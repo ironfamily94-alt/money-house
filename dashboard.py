@@ -629,6 +629,11 @@ PAGE = r"""<!doctype html>
     <h1><span class="dot">●</span> 내 자산관리 대시보드</h1>
     <div class="updated">업데이트 <b id="updated">불러오는 중…</b> · 60초마다 자동</div>
   </header>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin:8px 2px 0">
+    <button class="btn ghost" id="btn-export" style="padding:6px 12px;font-size:12px">💾 내보내기(백업)</button>
+    <button class="btn ghost" id="btn-import" style="padding:6px 12px;font-size:12px">📂 불러오기(복원)</button>
+    <input type="file" id="file-import" accept="application/json,.json" style="display:none">
+  </div>
   <div class="tabs">
     <div class="tab active" data-tab="market">📈 시장현황</div>
     <div class="tab" data-tab="asset">💼 종합(내 주식)</div>
@@ -1486,6 +1491,36 @@ async function refresh(silent){
     else if(curTab==="ledger") renderLedger();
   }catch(e){ if(!silent) showErr("데이터를 불러오지 못했어요. 인터넷 연결을 확인하고 잠시 뒤 새로고침(F5) 해주세요. ("+e+")"); }
 }
+// ===== 내보내기 / 불러오기 (기기·앱 사이 자료 옮기기) =====
+function exportData(){
+  const dump={ _app:"내자산관리", _ts:new Date().toISOString(),
+    holdings, ledger, networth, monthly:manualAssets,
+    members, groups, assetCats:nwCats, ledgerCats };
+  const blob=new Blob([JSON.stringify(dump,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="자산백업_"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function importData(file){
+  let d; try{ d=JSON.parse(await file.text()); }
+  catch(e){ alert("파일을 읽을 수 없어요. 백업 파일(.json)이 맞는지 확인해 주세요."); return; }
+  if(!(d.holdings||d.networth||d.ledger)){ alert("이 파일은 자산 백업 파일이 아닌 것 같아요."); return; }
+  if(!confirm("불러오면 지금 이 앱의 자료가 이 파일 내용으로 바뀌어요.\n(폰↔PC 연동 중이면 다른 기기에도 반영돼요)\n계속할까요?")) return;
+  if(Array.isArray(d.holdings)) holdings=d.holdings;
+  if(Array.isArray(d.ledger)) ledger=d.ledger;
+  if(d.networth&&typeof d.networth==="object") networth=d.networth;
+  if(d.monthly&&typeof d.monthly==="object") manualAssets=d.monthly;
+  if(Array.isArray(d.members)&&d.members.length) members=d.members;
+  if(Array.isArray(d.groups)) groups=d.groups;
+  if(Array.isArray(d.assetCats)&&d.assetCats.length) nwCats=d.assetCats;
+  if(d.ledgerCats&&typeof d.ledgerCats==="object") ledgerCats=d.ledgerCats;
+  try{ await Promise.all([saveHoldings(),saveLedger(),saveNetworth(),saveManual(),saveMembers()]); }catch(e){}
+  alert("불러오기 완료! 🎉 화면을 새로 불러올게요.");
+  location.reload();
+}
+$("#btn-export").onclick=exportData;
+$("#btn-import").onclick=()=>$("#file-import").click();
+$("#file-import").onchange=(e)=>{ const f=e.target.files[0]; e.target.value=""; if(f) importData(f); };
 async function init(){
   $("#l-date").value=new Date().toISOString().slice(0,10);
   await loadMembers(); renderMemberBar(); fillCats();
