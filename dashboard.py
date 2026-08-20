@@ -77,6 +77,98 @@ font-weight:700;font-size:16px;cursor:pointer;margin-top:10px}
 </body></html>"""
 
 
+# ===== 여러 명이 각자 로그인해서 자기 자료만 쓰는 모드 (배포용) =====
+MULTI_USER = os.environ.get("MULTI_USER", "").lower() in ("1", "true", "yes", "on")
+SESSION_SECRET = os.environ.get("SESSION_SECRET") or APP_PASSWORD or "awm-secret-change-me"
+_CTX = threading.local()
+
+
+def _current_user():
+    return getattr(_CTX, "user", None)
+
+
+def _sig(msg):
+    return hashlib.sha256((SESSION_SECRET + "|sess|" + msg).encode()).hexdigest()[:32]
+
+
+def _session_user(cookie):
+    for part in (cookie or "").split(";"):
+        part = part.strip()
+        if part.startswith("awm_sess="):
+            val = part[len("awm_sess="):]
+            if "." in val:
+                uid, sig = val.rsplit(".", 1)
+                if uid and _sig(uid) == sig:
+                    return uid
+    return None
+
+
+def _valid_userid(u):
+    return isinstance(u, str) and 3 <= len(u) <= 20 and all(
+        c.isascii() and (c.isalnum() or c in "_-") for c in u)
+
+
+def _pw_hash(userid, pw):
+    return hashlib.sha256((userid + "|" + SESSION_SECRET + "|pw|" + pw).encode()).hexdigest()
+
+
+def _user_get(userid):
+    try:
+        req = urllib.request.Request(UPSTASH_URL + "/get/awm:user:" + urllib.parse.quote(userid),
+                                     headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
+        with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+            v = json.loads(r.read().decode()).get("result")
+        return json.loads(v) if v else None
+    except Exception:
+        return None
+
+
+def _user_set(userid, obj):
+    req = urllib.request.Request(UPSTASH_URL + "/set/awm:user:" + urllib.parse.quote(userid),
+                                 data=json.dumps(obj, ensure_ascii=False).encode(), method="POST",
+                                 headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
+    with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+        r.read()
+
+
+AUTH_PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>내 자산관리</title>
+<style>body{background:#0e1117;color:#e8edf4;font-family:"맑은 고딕",system-ui,sans-serif;
+margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.box{background:#161b24;border:1px solid #242c3a;border-radius:16px;padding:34px 28px;width:300px;text-align:center}
+h2{margin:0 0 4px} .sub{color:#8a94a6;font-size:13px;margin:0 0 8px}
+input{width:100%;padding:13px;border-radius:10px;border:1px solid #242c3a;background:#1c2430;color:#e8edf4;
+font-size:16px;box-sizing:border-box;margin:8px 0 0;outline:none}
+input:focus{border-color:#f5c451}
+button{width:100%;padding:13px;border-radius:10px;border:none;background:#f5c451;color:#1a1200;
+font-weight:700;font-size:16px;cursor:pointer;margin-top:14px}
+.err{color:#ff8f8f;font-size:13px;min-height:18px;margin-top:6px}
+.toggle{margin-top:16px;font-size:13px;color:#8a94a6} .toggle a{color:#f5c451;cursor:pointer;text-decoration:none}</style>
+</head><body><div class="box"><h2>💰 내 자산관리</h2>
+<div class="sub" id="sub">로그인해서 내 자료를 봐요</div>
+<div class="err" id="e"></div>
+<form id="f" method="post" action="/login">
+<input name="userid" placeholder="아이디 (영문·숫자 3~20자)" autocomplete="username" autofocus>
+<input type="password" name="pw" placeholder="비밀번호" autocomplete="current-password">
+<button id="submit">로그인</button></form>
+<div class="toggle" id="tg">처음이세요? <a id="t">회원 만들기</a></div></div>
+<script>
+var mode="login";
+function setMode(m){mode=m;var f=document.getElementById("f"),s=document.getElementById("submit"),
+ sub=document.getElementById("sub"),tg=document.getElementById("tg");
+ f.action=(m==="login")?"/login":"/signup"; s.textContent=(m==="login")?"로그인":"회원 만들기";
+ sub.textContent=(m==="login")?"로그인해서 내 자료를 봐요":"아이디·비밀번호를 정하면 끝이에요 (이메일 필요 없어요)";
+ tg.innerHTML=(m==="login")?'처음이세요? <a id="t">회원 만들기</a>':'이미 있으세요? <a id="t">로그인</a>';
+ document.getElementById("t").onclick=function(){setMode(mode==="login"?"signup":"login");};}
+document.getElementById("t").onclick=function(){setMode("signup");};
+var q=location.search;
+if(q.indexOf("err=taken")>=0)document.getElementById("e").textContent="이미 있는 아이디예요.";
+else if(q.indexOf("err=bad")>=0)document.getElementById("e").textContent="아이디는 영문·숫자 3~20자, 비밀번호도 확인해 주세요.";
+else if(q.indexOf("err=login")>=0)document.getElementById("e").textContent="아이디 또는 비밀번호가 틀렸어요.";
+if(q.indexOf("signup")>=0)setMode("signup");
+</script></body></html>"""
+
+
 # 요청마다 새 풀을 만들지 않고 하나를 재사용 (부하·스레드 생성 실패 방지)
 _EXECUTOR = ThreadPoolExecutor(max_workers=24)
 
@@ -135,8 +227,15 @@ _RKEY = {"주식.json": "stock", "가계부.json": "ledger", "자산현황.json"
          "가족.json": "members", "월별자산.json": "monthly"}
 
 
+def _rkey(name):
+    base = _RKEY.get(name, name)
+    if MULTI_USER:                       # 사람별 칸으로 분리 (자기 자료만)
+        return "awm:u:" + (_current_user() or "_anon") + ":" + base
+    return "awm:" + base
+
+
 def _redis_get(name):
-    key = "awm:" + _RKEY.get(name, name)
+    key = _rkey(name)
     req = urllib.request.Request(UPSTASH_URL + "/get/" + key,
                                  headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
@@ -144,7 +243,7 @@ def _redis_get(name):
 
 
 def _redis_set(name, value):
-    key = "awm:" + _RKEY.get(name, name)
+    key = _rkey(name)
     req = urllib.request.Request(UPSTASH_URL + "/set/" + key, data=value.encode("utf-8"),
                                  method="POST", headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
@@ -489,6 +588,7 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>내 자산관리 대시보드</title>
+<script>window.MULTIUSER=__MULTIUSER__;</script>
 <style>
   :root{
     --bg:#0e1117; --panel:#161b24; --panel2:#1c2430; --line:#242c3a;
@@ -632,6 +732,7 @@ PAGE = r"""<!doctype html>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin:8px 2px 0">
     <button class="btn ghost" id="btn-export" style="padding:6px 12px;font-size:12px">💾 내보내기(백업)</button>
     <button class="btn ghost" id="btn-import" style="padding:6px 12px;font-size:12px">📂 불러오기(복원)</button>
+    <button class="btn ghost" id="btn-logout" style="padding:6px 12px;font-size:12px;display:none">🚪 로그아웃</button>
     <input type="file" id="file-import" accept="application/json,.json" style="display:none">
   </div>
   <div class="tabs">
@@ -1521,6 +1622,7 @@ async function importData(file){
 $("#btn-export").onclick=exportData;
 $("#btn-import").onclick=()=>$("#file-import").click();
 $("#file-import").onchange=(e)=>{ const f=e.target.files[0]; e.target.value=""; if(f) importData(f); };
+if(window.MULTIUSER){ const lo=$("#btn-logout"); lo.style.display=""; lo.onclick=()=>{ location.href="/logout"; }; }
 async function init(){
   $("#l-date").value=new Date().toISOString().slice(0,10);
   await loadMembers(); renderMemberBar(); fillCats();
@@ -1579,15 +1681,68 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Location", "/login?err=1")
             self.end_headers()
 
+    # ---- 여러 명 로그인(배포용) ----
+    def _auth_page(self, code=200):
+        self._send(code, AUTH_PAGE, "text/html")
+
+    def _session_cookie(self, userid):
+        return ("awm_sess=" + userid + "." + _sig(userid)
+                + "; Path=/; Max-Age=31536000; SameSite=Lax")
+
+    def _redir(self, loc, cookie=None):
+        self.send_response(302)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Location", loc)
+        self.end_headers()
+
+    def _form(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        q = urllib.parse.parse_qs(raw)
+        return q.get("userid", [""])[0].strip(), q.get("pw", [""])[0]
+
+    def _do_signup(self):
+        userid, pw = self._form()
+        if not _valid_userid(userid) or len(pw) < 4:
+            return self._redir("/login?signup=1&err=bad")
+        if _user_get(userid) is not None:
+            return self._redir("/login?signup=1&err=taken")
+        try:
+            _user_set(userid, {"pw": _pw_hash(userid, pw), "created": datetime.now(KST).isoformat()})
+        except Exception:
+            return self._redir("/login?signup=1&err=bad")
+        return self._redir("/", self._session_cookie(userid))
+
+    def _do_user_login(self):
+        userid, pw = self._form()
+        u = _user_get(userid)
+        if u and u.get("pw") == _pw_hash(userid, pw):
+            return self._redir("/", self._session_cookie(userid))
+        return self._redir("/login?err=login")
+
+    def _logout(self):
+        self.send_response(302)
+        self.send_header("Set-Cookie", "awm_sess=; Path=/; Max-Age=0")
+        self.send_header("Location", "/login")
+        self.end_headers()
+
     def do_GET(self):
         p = self.path.split("?")[0]
-        if LOCKED and p == "/login":
+        if MULTI_USER:
+            if p == "/logout":
+                return self._logout()
+            user = _session_user(self.headers.get("Cookie", ""))
+            if not user:
+                return self._auth_page()
+            _CTX.user = user
+        elif LOCKED and p == "/login":
             return self._login_page()
-        if LOCKED and not self._authed():
+        elif LOCKED and not self._authed():
             return self._login_page()
         try:
             if p == "/":
-                self._send(200, PAGE, "text/html")
+                self._send(200, PAGE.replace("__MULTIUSER__", "1" if MULTI_USER else "0"), "text/html")
             elif p == "/api/market":
                 self._json(build_market())
             elif p == "/api/portfolio_live":
@@ -1619,9 +1774,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = self.path.split("?")[0]
-        if LOCKED and p == "/login":
+        if MULTI_USER:
+            if p == "/login":
+                return self._do_user_login()
+            if p == "/signup":
+                return self._do_signup()
+            user = _session_user(self.headers.get("Cookie", ""))
+            if not user:
+                return self._json({"error": "unauthorized"}, 401)
+            _CTX.user = user
+        elif LOCKED and p == "/login":
             return self._do_login()
-        if LOCKED and not self._authed():
+        elif LOCKED and not self._authed():
             return self._json({"error": "unauthorized"}, 401)
         data = self._body()
         try:
