@@ -127,7 +127,37 @@ def _cache_set(key, val):
         _QCACHE[key] = (time.time(), val)
 
 
+# 인터넷 저장소(Upstash Redis) — 있으면 폰·PC가 같은 자료를 공유(자동연동)
+UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+USE_REDIS = bool(UPSTASH_URL and UPSTASH_TOKEN)
+_RKEY = {"주식.json": "stock", "가계부.json": "ledger", "자산현황.json": "networth",
+         "가족.json": "members", "월별자산.json": "monthly"}
+
+
+def _redis_get(name):
+    key = "awm:" + _RKEY.get(name, name)
+    req = urllib.request.Request(UPSTASH_URL + "/get/" + key,
+                                 headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
+    with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+        return json.loads(r.read().decode("utf-8")).get("result")
+
+
+def _redis_set(name, value):
+    key = "awm:" + _RKEY.get(name, name)
+    req = urllib.request.Request(UPSTASH_URL + "/set/" + key, data=value.encode("utf-8"),
+                                 method="POST", headers={"Authorization": "Bearer " + UPSTASH_TOKEN})
+    with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
+        r.read()
+
+
 def load_json(name, default):
+    if USE_REDIS:
+        try:
+            v = _redis_get(name)
+            return json.loads(v) if v else default
+        except Exception:
+            return default
     try:
         with open(os.path.join(DATA_DIR, name), encoding="utf-8") as f:
             return json.load(f)
@@ -136,8 +166,12 @@ def load_json(name, default):
 
 
 def save_json(name, obj):
+    s = json.dumps(obj, ensure_ascii=False, indent=2)
+    if USE_REDIS:
+        _redis_set(name, s)
+        return
     with open(os.path.join(DATA_DIR, name), "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+        f.write(s)
 
 
 # --------------------------- 시세 수집 (45초 캐시 적용) ---------------------------
@@ -945,9 +979,9 @@ async function loadMarket(){
 let holdings=[], liveCache={total_krw:0};
 async function loadHoldings(){ const srv=await fetchJSON("/api/portfolio_raw").catch(()=>undefined);
   const bak=lsGet(LS.holdings);
-  if(bak&&bak.length) holdings=bak;            // 백업에 자료 있으면 우선
-  else if(srv!==undefined) holdings=srv||[];   // 없으면 서버값(불러오기 성공했을 때만)
-  else holdings=bak||[];                        // 불러오기 실패 → 있는 그대로 (덮어쓰지 않음)
+  if(srv&&srv.length) holdings=srv;            // 서버에 자료 있으면 우선(폰·PC 동기화)
+  else if(bak&&bak.length) holdings=bak;        // 서버 비었으면 백업(→ 아래 restore가 서버로 올림)
+  else holdings=(srv!==undefined?(srv||[]):(bak||[]));
   lsSet(LS.holdings, holdings); }
 async function saveHoldings(){ lsSet(LS.holdings, holdings);   // 1) 브라우저 백업 (항상 성공)
   try{ await fetchJSON("/api/portfolio_raw",{method:"POST",
@@ -1080,9 +1114,9 @@ async function removeNwCat(c){
 }
 async function loadNetworth(){ const srv=await fetchJSON("/api/networth").catch(()=>undefined);
   const bak=lsGet(LS.networth);
-  if(bak&&Object.keys(bak).length) networth=bak;
-  else if(srv!==undefined) networth=srv||{};
-  else networth=bak||{};
+  if(srv&&Object.keys(srv).length) networth=srv;
+  else if(bak&&Object.keys(bak).length) networth=bak;
+  else networth=(srv!==undefined?(srv||{}):(bak||{}));
   lsSet(LS.networth, networth); }
 async function saveNetworth(){ lsSet(LS.networth, networth);
   try{ await fetchJSON("/api/networth",{method:"POST",
@@ -1247,9 +1281,9 @@ $("#l-cat-add").onclick=async()=>{
   await saveMembers(); fillCats(); $("#l-cat").value=name; };
 async function loadLedger(){ const srv=await fetchJSON("/api/ledger").catch(()=>undefined);
   const bak=lsGet(LS.ledger);
-  if(bak&&bak.length) ledger=bak;
-  else if(srv!==undefined) ledger=srv||[];
-  else ledger=bak||[];
+  if(srv&&srv.length) ledger=srv;
+  else if(bak&&bak.length) ledger=bak;
+  else ledger=(srv!==undefined?(srv||[]):(bak||[]));
   lsSet(LS.ledger, ledger); }
 async function saveLedger(){ lsSet(LS.ledger, ledger);
   try{ await fetchJSON("/api/ledger",{method:"POST",
@@ -1259,9 +1293,9 @@ async function saveLedger(){ lsSet(LS.ledger, ledger);
 let manualAssets={};
 async function loadManual(){ const srv=await fetchJSON("/api/monthly").catch(()=>undefined);
   const bak=lsGet(LS.manual);
-  if(bak&&Object.keys(bak).length) manualAssets=bak;
-  else if(srv!==undefined) manualAssets=srv||{};
-  else manualAssets=bak||{};
+  if(srv&&Object.keys(srv).length) manualAssets=srv;
+  else if(bak&&Object.keys(bak).length) manualAssets=bak;
+  else manualAssets=(srv!==undefined?(srv||{}):(bak||{}));
   lsSet(LS.manual, manualAssets); }
 async function saveManual(){ lsSet(LS.manual, manualAssets);
   try{ await fetchJSON("/api/monthly",{method:"POST",
@@ -1364,10 +1398,13 @@ async function loadMembers(){ const d=await fetchJSON("/api/members").catch(()=>
   const srvC=(d&&Array.isArray(d.assetCats)&&d.assetCats.length)?d.assetCats:null;
   const srvLC=(d&&d.ledgerCats&&typeof d.ledgerCats==="object")?d.ledgerCats:null;
   const bakM=lsGet(LS.members), bakG=lsGet(LS.groups), bakC=lsGet(LS.cats), bakLC=lsGet(LS.lcats);
-  members=(bakM&&bakM.length)?bakM:(srvM||["남편","아내","자녀"]);
-  groups=(bakG!=null)?bakG:(srvG||[]);
-  nwCats=(bakC&&bakC.length)?bakC:(srvC||[...NW_DEFAULT_CATS]);
-  ledgerCats=(bakLC!=null)?bakLC:(srvLC||{});
+  if(srvM){                                     // 서버에 가족설정 있으면 서버 우선(동기화)
+    members=srvM; groups=srvG||[]; nwCats=srvC||[...NW_DEFAULT_CATS]; ledgerCats=srvLC||{};
+  }else if(bakM&&bakM.length){                  // 서버 비었으면 백업
+    members=bakM; groups=bakG||[]; nwCats=(bakC&&bakC.length)?bakC:[...NW_DEFAULT_CATS]; ledgerCats=bakLC||{};
+  }else{
+    members=["남편","아내","자녀"]; groups=[]; nwCats=[...NW_DEFAULT_CATS]; ledgerCats={};
+  }
   lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats); }
 async function saveMembers(){ lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats);
   try{ await fetchJSON("/api/members",{method:"POST",
