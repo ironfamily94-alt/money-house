@@ -45,9 +45,11 @@ F_MEMBERS = "가족.json"
 F_MANUAL = "월별자산.json"
 DEFAULT_MEMBERS = ["남편", "아내", "자녀"]
 
-# 클라우드 모드: 환경변수 APP_PASSWORD 가 있으면 켜짐 (비밀번호 잠금 + 외부 접속)
+# 클라우드 모드: 렌더 등 호스팅은 PORT 환경변수를 줌 → 외부접속(0.0.0.0)으로 실행
+# 비밀번호 잠금(LOCKED)은 APP_PASSWORD 가 있을 때만 (없어도 서버는 켜짐)
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
-CLOUD = bool(APP_PASSWORD)
+CLOUD = os.environ.get("PORT") is not None
+LOCKED = bool(APP_PASSWORD)
 
 
 def _auth_token():
@@ -1482,7 +1484,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
 
     def _authed(self):
-        if not CLOUD:
+        if not LOCKED:
             return True
         cookie = self.headers.get("Cookie", "") or ""
         return ("awm_auth=" + _auth_token()) in cookie
@@ -1507,9 +1509,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?")[0]
-        if CLOUD and p == "/login":
+        if LOCKED and p == "/login":
             return self._login_page()
-        if CLOUD and not self._authed():
+        if LOCKED and not self._authed():
             return self._login_page()
         try:
             if p == "/":
@@ -1545,9 +1547,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = self.path.split("?")[0]
-        if CLOUD and p == "/login":
+        if LOCKED and p == "/login":
             return self._do_login()
-        if CLOUD and not self._authed():
+        if LOCKED and not self._authed():
             return self._json({"error": "unauthorized"}, 401)
         data = self._body()
         try:
@@ -1597,10 +1599,10 @@ class Server(socketserver.ThreadingTCPServer):
 
 def main():
     if CLOUD:
-        # 클라우드(허깅페이스 등): 외부 접속 허용 + 비밀번호 잠금
+        # 클라우드(렌더 등): 외부 접속 허용(0.0.0.0). 비밀번호는 APP_PASSWORD 있을 때만.
         host = "0.0.0.0"
         port = int(os.environ.get("PORT", "7860"))
-        print(f"[클라우드 모드] 비밀번호 잠금 켜짐 · 포트 {port}")
+        print(f"[클라우드 모드] 포트 {port} · 비밀번호 잠금 {'켜짐' if LOCKED else '꺼짐(APP_PASSWORD 미설정)'}")
         with Server((host, port), Handler) as httpd:
             httpd.serve_forever()
     else:
