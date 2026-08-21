@@ -674,6 +674,8 @@ PAGE = r"""<!doctype html>
   tr:last-child td{border-bottom:none;}
   .brk-row td{background:var(--panel2);font-weight:700;color:var(--accent);}
   .mini-btn{background:#2a1416;color:#ff9a9a;border:1px solid #5a2327;border-radius:7px;padding:4px 10px;cursor:pointer;font-size:12px;}
+  .mini-btn.edit{background:#12303a;color:#5fd0e0;border-color:#1e5a6a;}
+  .mini-btn.save{background:#123a22;color:#5fe08a;border-color:#1e5a3a;}
   .mini-btn:hover{background:#3a1a1d;}
   .form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
     display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;}
@@ -720,6 +722,41 @@ PAGE = r"""<!doctype html>
   @media (max-width:760px){
     .idx-grid{grid-template-columns:1fr 1fr;} .rate-wrap,.bottom-wrap,.two{grid-template-columns:1fr;}
     .price{font-size:22px;} .stat .big{font-size:22px;}
+  }
+  /* ===== 폰(모바일) 최적화 : 표를 카드로, 글씨·버튼 크게 ===== */
+  @media (max-width:640px){
+    .wrap{padding:14px 12px 60px;}
+    h1{font-size:19px;} .updated{font-size:11px;}
+    header{flex-direction:column;align-items:flex-start;gap:2px;}
+    .tabs{gap:2px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;}
+    .tab{padding:10px 12px;font-size:14px;white-space:nowrap;}
+    .idx-grid,.stat-grid{grid-template-columns:1fr 1fr;gap:8px;}
+    .card{padding:12px;} .price{font-size:20px;} .stat .big{font-size:19px;}
+    .form{padding:12px;gap:8px;} .form .fld{flex:1 1 44%;}
+    .form input,.form select{width:100%;box-sizing:border-box;}
+    .mini-btn{padding:8px 14px;font-size:14px;}
+    .btn{padding:11px 16px;}
+    /* 주식·가계부 표 → 카드 */
+    #stock-tbl thead,#ledger-tbl thead{display:none;}
+    #stock-tbl table,#ledger-tbl table,#stock-tbl tbody,#ledger-tbl tbody{display:block;}
+    #stock-tbl tr,#ledger-tbl tr{display:block;background:var(--panel2);border:1px solid var(--line);
+      border-radius:12px;margin-bottom:10px;padding:8px 12px;}
+    #stock-tbl td,#ledger-tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;
+      border:none;padding:6px 0;text-align:right;white-space:normal;font-size:15px;}
+    #stock-tbl td[data-label]::before,#ledger-tbl td[data-label]::before{
+      content:attr(data-label);color:var(--sub);font-size:13px;font-weight:600;white-space:nowrap;}
+    #stock-tbl td.l:not([data-label]),#ledger-tbl td.ldate{justify-content:flex-start;font-size:16px;
+      font-weight:700;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:2px;}
+    #stock-tbl td.c-act,#ledger-tbl td.c-act{justify-content:flex-end;gap:8px;padding-top:8px;}
+    #stock-tbl td.empty,#ledger-tbl td.empty{justify-content:center;color:var(--sub);}
+    #stock-tbl input.ed-qty,#stock-tbl input.ed-avg{width:120px !important;font-size:15px;}
+    /* 그룹헤더·합계 줄 → 한 줄 바 */
+    #stock-tbl tr.brk-row,#stock-tbl tr.tot-row{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:10px 12px;}
+    #stock-tbl tr.brk-row td,#stock-tbl tr.tot-row td{display:inline;padding:0;font-size:14px;border:none;}
+    #stock-tbl tr.brk-row td:empty,#stock-tbl tr.tot-row td:empty{display:none;}
+    #stock-tbl tr.brk-row td.l,#stock-tbl tr.tot-row td.l{flex-basis:100%;border:none;padding:0 0 2px;}
+    /* 자산현황 세부항목 폰 최적화 */
+    .nw-item input.nm{min-width:56px;} .nw-item input.am{width:96px;} .nw-item select.mv{max-width:72px;}
   }
 </style>
 </head>
@@ -1128,12 +1165,12 @@ async function loadAsset(){
       <td class="${sc}">${spct>=0?"+":""}${spct.toFixed(2)}%</td><td></td></tr>`;
     gr.forEach(({r,i})=>{
       const usd=r.currency==="USD"; const unit=usd?"$":"₩"; const dp=usd?2:0; const c=cls(r.pl);
-      html+=`<tr><td class="l"><b>${r.name||"-"}</b> <span style="color:#6b7484;font-size:12px">${r.market} ${r.code}</span></td>
-        <td>${fmt(r.qty,0)}</td><td>${unit}${fmt(r.avg,dp)}</td>
-        <td>${r.price===null?"-":unit+fmt(r.price,dp)}</td><td>${won(r.val_krw)}</td>
-        <td class="${c}">${r.pl===null?"-":(r.pl>=0?"+":"-")+unit+fmt(Math.abs(r.pl),dp)}</td>
-        <td class="${c}">${r.plpct===null?"-":(r.plpct>=0?"+":"")+fmt(r.plpct,2)+"%"}</td>
-        <td><button class="mini-btn" onclick="delHolding(${i})">삭제</button></td></tr>`;
+      html+=`<tr data-i="${i}"><td class="l"><b>${r.name||"-"}</b> <span style="color:#6b7484;font-size:12px">${r.market} ${r.code}</span></td>
+        <td class="c-qty" data-label="수량">${fmt(r.qty,0)}</td><td class="c-avg" data-label="평균가">${unit}${fmt(r.avg,dp)}</td>
+        <td data-label="현재가">${r.price===null?"-":unit+fmt(r.price,dp)}</td><td data-label="평가액">${won(r.val_krw)}</td>
+        <td class="${c}" data-label="손익">${r.pl===null?"-":(r.pl>=0?"+":"-")+unit+fmt(Math.abs(r.pl),dp)}</td>
+        <td class="${c}" data-label="손익률">${r.plpct===null?"-":(r.plpct>=0?"+":"")+fmt(r.plpct,2)+"%"}</td>
+        <td class="c-act"><button class="mini-btn edit" onclick="editHolding(${i})">✏️</button> <button class="mini-btn" onclick="delHolding(${i})">삭제</button></td></tr>`;
     });
   });
   if(view.length>0){
@@ -1154,6 +1191,24 @@ window.delHolding=async(i)=>{
   try{ await saveHoldings(); clearErr(); }
   catch(e){ holdings.splice(i,0,...removed); showErr("삭제 저장에 실패했어요. 잠시 뒤 다시 시도해 주세요."); return; }
   loadAsset().catch(()=>{});  // 시세는 따로
+};
+// 수량·평균가 바로 수정 (인라인)
+window.editHolding=(i)=>{
+  const h=holdings[i]; if(!h) return;
+  const tr=document.querySelector('#stock-tbl tr[data-i="'+i+'"]'); if(!tr) return;
+  tr.querySelector(".c-qty").innerHTML='<input class="ed-qty" type="number" step="any" value="'+h.qty+'" style="width:66px;padding:5px;text-align:right">';
+  tr.querySelector(".c-avg").innerHTML='<input class="ed-avg" type="number" step="any" value="'+h.avg+'" style="width:88px;padding:5px;text-align:right">';
+  tr.querySelector(".c-act").innerHTML='<button class="mini-btn save" onclick="saveEdit('+i+')">저장</button> <button class="mini-btn" onclick="loadAsset()">취소</button>';
+  const q=tr.querySelector(".ed-qty"); if(q){ q.focus(); q.select(); }
+};
+window.saveEdit=async(i)=>{
+  const tr=document.querySelector('#stock-tbl tr[data-i="'+i+'"]'); if(!tr||!holdings[i]) return;
+  const q=parseFloat(tr.querySelector(".ed-qty").value), a=parseFloat(tr.querySelector(".ed-avg").value);
+  if(isNaN(q)||isNaN(a)){ alert("수량과 평균가를 숫자로 입력해 주세요."); return; }
+  holdings[i].qty=q; holdings[i].avg=a;
+  try{ await saveHoldings(); clearErr(); }
+  catch(e){ showErr("수정 저장에 실패했어요. 잠시 뒤 다시 시도해 주세요."); return; }
+  loadAsset().catch(()=>{});
 };
 $("#s-add").onclick=async()=>{
   const market=$("#s-market").value, isGold=(market==="금현물");
@@ -1471,11 +1526,11 @@ function renderLedger(){
     <th class="l">메모</th><th>금액</th><th></th></tr></thead><tbody>`;
   if(items.length===0){ html+=`<tr><td colspan="7" class="empty">이 달 내역이 없어요. 위에서 추가해 보세요.</td></tr>`; }
   items.forEach(x=>{ const e=x.e; const c=e.type==="수입"?"up":"down";
-    html+=`<tr><td class="l">${e.date}</td><td class="l">${e.member||"공용"}</td>
-      <td class="l"><span class="pill ${e.type}">${e.type}</span></td>
-      <td class="l">${e.category||"-"}</td><td class="l">${e.memo||""}</td>
-      <td class="${c}">${e.type==="수입"?"+":"-"}${won(e.amount)}</td>
-      <td><button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
+    html+=`<tr><td class="l ldate">${e.date}</td><td class="l" data-label="가족">${e.member||"공용"}</td>
+      <td class="l" data-label="구분"><span class="pill ${e.type}">${e.type}</span></td>
+      <td class="l" data-label="분류">${e.category||"-"}</td><td class="l" data-label="메모">${e.memo||""}</td>
+      <td class="${c}" data-label="금액">${e.type==="수입"?"+":"-"}${won(e.amount)}</td>
+      <td class="c-act"><button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
   html+=`</tbody></table>`; $("#ledger-tbl").innerHTML=html;
 }
 
