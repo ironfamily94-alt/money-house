@@ -604,6 +604,11 @@ PAGE = r"""<!doctype html>
   h1{font-size:21px;margin:0;letter-spacing:-0.3px;}
   h1 .dot{color:var(--accent);}
   .updated{font-size:12px;color:var(--sub);} .updated b{color:var(--text);font-weight:600;}
+  .brandbar{display:flex;justify-content:flex-end;margin:2px 2px 0;}
+  .brand{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:999px;
+    background:linear-gradient(135deg,#1c3a44,#20303a);border:1px solid var(--line);
+    font-size:13px;font-weight:600;color:var(--sub);white-space:nowrap;}
+  .brand .emo{font-size:16px;} .brand b{color:var(--accent);font-weight:800;}
   .tabs{display:flex;gap:4px;margin:16px 0 14px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
   .tab{padding:11px 16px;cursor:pointer;font-size:15px;color:var(--sub);
     border-bottom:2px solid transparent;font-weight:600;user-select:none;}
@@ -778,6 +783,7 @@ PAGE = r"""<!doctype html>
 </head>
 <body>
 <div class="wrap">
+  <div class="brandbar"><span class="brand"><span class="emo">💪</span> 자산관리 <b>빨리하자</b></span></div>
   <header>
     <h1><span class="dot">●</span> 내 자산관리 대시보드</h1>
     <div class="updated">업데이트 <b id="updated">불러오는 중…</b> · 60초마다 자동</div>
