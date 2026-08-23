@@ -757,6 +757,22 @@ PAGE = r"""<!doctype html>
     #stock-tbl tr.brk-row td.l,#stock-tbl tr.tot-row td.l{flex-basis:100%;border:none;padding:0 0 2px;}
     /* 자산현황 세부항목 폰 최적화 */
     .nw-item input.nm{min-width:56px;} .nw-item input.am{width:96px;} .nw-item select.mv{max-width:72px;}
+    /* 가계부 '이 달 내역' → 컴팩트 2줄 카드 (자리 덜 차지·가독성↑) */
+    #ledger-tbl tr{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;padding:9px 12px;margin-bottom:7px;}
+    #ledger-tbl td{display:inline-flex;width:auto;padding:0;border:none;font-size:13px;text-align:left;
+      justify-content:flex-start;white-space:nowrap;}
+    #ledger-tbl td[data-label]::before{content:none;}
+    #ledger-tbl td[data-label="분류"]{order:1;font-weight:700;font-size:15px;color:var(--txt);flex:1 1 auto;}
+    #ledger-tbl td[data-label="금액"]{order:2;font-weight:800;font-size:15.5px;margin-left:auto;flex:0 0 auto;}
+    #ledger-tbl td.ldate{order:3;font-size:12px;font-weight:600;color:var(--sub);border:none;padding:0;margin:0;flex:0 0 auto;}
+    #ledger-tbl td[data-label="구분"]{order:4;flex:0 0 auto;}
+    #ledger-tbl td[data-label="가족"]{order:5;color:var(--sub);font-size:12px;flex:0 0 auto;}
+    #ledger-tbl td.c-act{order:6;margin-left:auto;flex:0 0 auto;padding:0;gap:6px;}
+    #ledger-tbl td.c-act .mini-btn{padding:5px 12px;font-size:13px;}
+    #ledger-tbl td[data-label="메모"]{order:7;flex:1 1 100%;color:var(--sub);font-size:12.5px;white-space:normal;}
+    #ledger-tbl td[data-label="메모"]:empty{display:none;}
+    #ledger-tbl td.empty{flex:1 1 100%;justify-content:center;}
+    #ledger-tbl .pill{font-size:11px;padding:1px 7px;}
   }
 </style>
 </head>
@@ -828,8 +844,8 @@ PAGE = r"""<!doctype html>
       <div class="fld"><label>시장</label>
         <select id="s-market"><option>코스피</option><option>코스닥</option><option>미국주식</option><option>암호화폐</option><option>금현물</option></select></div>
       <div class="fld"><label>종목코드/티커</label><input id="s-code" placeholder="예: 005930" size="9"></div>
-      <div class="fld"><label>수량</label><input id="s-qty" type="number" step="any" placeholder="10" size="6"></div>
-      <div class="fld"><label>평균매입가</label><input id="s-avg" type="number" step="any" placeholder="70000" size="8"></div>
+      <div class="fld"><label>수량</label><input id="s-qty" data-comma placeholder="10" size="6"></div>
+      <div class="fld"><label>평균매입가</label><input id="s-avg" data-comma placeholder="70000" size="8"></div>
       <button class="btn" id="s-add">＋ 추가</button>
     </div>
     <div class="hint">코스피/코스닥은 <b>종목코드 6자리</b>(삼성전자 005930), 미국주식은 <b>티커</b>(AAPL),
@@ -873,8 +889,8 @@ PAGE = r"""<!doctype html>
     </div>
     <div class="sec-title">이 달 자산 기록 (직접 입력 · 매월 고정 저장)</div>
     <div class="form">
-      <div class="fld"><label>총자산(원)</label><input id="ma-total" type="number" step="any" placeholder="0"></div>
-      <div class="fld"><label>부채(원)</label><input id="ma-debt" type="number" step="any" placeholder="0"></div>
+      <div class="fld"><label>총자산(원)</label><input id="ma-total" data-comma placeholder="0"></div>
+      <div class="fld"><label>부채(원)</label><input id="ma-debt" data-comma placeholder="0"></div>
       <div class="fld"><label>순자산 (총자산−부채, 자동)</label>
         <input id="ma-net" readonly style="background:#12303a;color:#5fd0e0;font-weight:700;"></div>
       <span class="autosave" id="ma-saved"></span>
@@ -897,9 +913,10 @@ PAGE = r"""<!doctype html>
           <select id="l-cat"></select>
           <button class="btn ghost" id="l-cat-add" title="분류 추가" style="padding:9px 11px;font-weight:700">＋</button>
         </div></div>
-      <div class="fld"><label>금액(원)</label><input id="l-amt" type="number" step="any" placeholder="15000" size="8"></div>
+      <div class="fld"><label>금액(원)</label><input id="l-amt" data-comma placeholder="15000" size="8"></div>
       <div class="fld"><label>메모</label><input id="l-memo" placeholder="예: 점심 식사" size="11"></div>
       <button class="btn" id="l-add">＋ 추가</button>
+      <button class="btn ghost" id="l-cancel" style="display:none">취소</button>
     </div>
     <div class="sec-title">이 달 내역</div>
     <div class="tbl-wrap" id="ledger-tbl"></div>
@@ -925,6 +942,27 @@ function manwon(n){ // 만원 단위 짧게
   const m=Math.round(n/10000); return m.toLocaleString("ko-KR")+"만"; }
 function showErr(m){ const e=$("#err"); e.style.display="block"; e.textContent=m; }
 function clearErr(){ $("#err").style.display="none"; }
+
+// ===== 숫자 입력칸에 천단위 쉼표 자동 =====
+function groupNum(str){ str=String(str==null?"":str); const neg=str.trim().charAt(0)==="-";
+  str=str.replace(/[^0-9.]/g,""); const dot=str.indexOf(".");
+  let ip,dp=null;
+  if(dot>=0){ ip=str.slice(0,dot).replace(/\./g,""); dp=str.slice(dot+1).replace(/\./g,""); }
+  else ip=str;
+  ip=ip.replace(/^0+(?=\d)/,"");
+  const g=ip.replace(/\B(?=(\d{3})+(?!\d))/g,",");
+  return (neg?"-":"")+(dot>=0?g+"."+dp:g); }
+function numVal(sel){ const el=typeof sel==="string"?$(sel):sel; if(!el) return NaN;
+  return parseFloat(String(el.value).replace(/,/g,"")); }
+function setNum(sel,v){ const el=typeof sel==="string"?$(sel):sel; if(!el) return;
+  el.value=(v===""||v===null||v===undefined||isNaN(v))?"":groupNum(String(v)); }
+function attachComma(el){ if(!el||el._comma) return; el._comma=1;
+  el.type="text"; el.setAttribute("inputmode","decimal"); el.setAttribute("autocomplete","off");
+  el.addEventListener("input",()=>{ const before=el.value.slice(0,el.selectionStart||0);
+    const nb=(before.match(/[0-9]/g)||[]).length; el.value=groupNum(el.value);
+    let pos=0,seen=0; while(pos<el.value.length&&seen<nb){ const c=el.value.charCodeAt(pos); if(c>=48&&c<=57)seen++; pos++; }
+    if(el.setSelectionRange){ try{el.setSelectionRange(pos,pos);}catch(e){} } }); }
+function commaInit(root){ (root||document).querySelectorAll("input[data-comma]").forEach(attachComma); }
 
 // 네트워크 요청 (실패하면 자동으로 몇 번 더 시도해서 간헐적 끊김을 넘김)
 async function fetchJSON(url, opts, tries=3){
@@ -1196,14 +1234,15 @@ window.delHolding=async(i)=>{
 window.editHolding=(i)=>{
   const h=holdings[i]; if(!h) return;
   const tr=document.querySelector('#stock-tbl tr[data-i="'+i+'"]'); if(!tr) return;
-  tr.querySelector(".c-qty").innerHTML='<input class="ed-qty" type="number" step="any" value="'+h.qty+'" style="width:66px;padding:5px;text-align:right">';
-  tr.querySelector(".c-avg").innerHTML='<input class="ed-avg" type="number" step="any" value="'+h.avg+'" style="width:88px;padding:5px;text-align:right">';
+  tr.querySelector(".c-qty").innerHTML='<input class="ed-qty" value="'+groupNum(h.qty)+'" style="width:66px;padding:5px;text-align:right">';
+  tr.querySelector(".c-avg").innerHTML='<input class="ed-avg" value="'+groupNum(h.avg)+'" style="width:88px;padding:5px;text-align:right">';
   tr.querySelector(".c-act").innerHTML='<button class="mini-btn save" onclick="saveEdit('+i+')">저장</button> <button class="mini-btn" onclick="loadAsset()">취소</button>';
+  attachComma(tr.querySelector(".ed-qty")); attachComma(tr.querySelector(".ed-avg"));
   const q=tr.querySelector(".ed-qty"); if(q){ q.focus(); q.select(); }
 };
 window.saveEdit=async(i)=>{
   const tr=document.querySelector('#stock-tbl tr[data-i="'+i+'"]'); if(!tr||!holdings[i]) return;
-  const q=parseFloat(tr.querySelector(".ed-qty").value), a=parseFloat(tr.querySelector(".ed-avg").value);
+  const q=numVal(tr.querySelector(".ed-qty")), a=numVal(tr.querySelector(".ed-avg"));
   if(isNaN(q)||isNaN(a)){ alert("수량과 평균가를 숫자로 입력해 주세요."); return; }
   holdings[i].qty=q; holdings[i].avg=a;
   try{ await saveHoldings(); clearErr(); }
@@ -1213,7 +1252,7 @@ window.saveEdit=async(i)=>{
 $("#s-add").onclick=async()=>{
   const market=$("#s-market").value, isGold=(market==="금현물");
   const code=$("#s-code").value.trim(), name=$("#s-name").value.trim();
-  const qty=parseFloat($("#s-qty").value), avg=parseFloat($("#s-avg").value);
+  const qty=numVal("#s-qty"), avg=numVal("#s-avg");
   if((!isGold && !code)||isNaN(qty)||isNaN(avg)){
     alert(isGold?"수량(그램)과 평균매입가(원/g)를 입력해 주세요.":"종목코드/티커, 수량, 평균매입가를 입력해 주세요."); return; }
   const item={name:name||(isGold?"금 현물":code), member:$("#s-member").value,
@@ -1355,7 +1394,7 @@ function renderNetworth(){
         const nmv=(it.name||"").replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         html+=`<div class="nw-item" data-cat="${cat}" data-idx="${idx}">
           <input class="nm" placeholder="항목명" value="${nmv}">
-          <input class="am" type="number" step="any" placeholder="0" value="${it.amount?it.amount:''}">
+          <input class="am" data-comma placeholder="0" value="${it.amount?groupNum(it.amount):''}">
           <select class="mv" title="다른 분류로 옮기기">${nwAll().map(c=>`<option${c===cat?" selected":""}>${c}</option>`).join("")}</select>
           <button class="mini-btn nw-del">✕</button></div>`;
       });
@@ -1370,9 +1409,9 @@ function renderNetworth(){
 function bindNwEditors(){
   $("#nw-cats").querySelectorAll(".nw-item[data-cat]").forEach(row=>{
     const cat=row.dataset.cat, idx=+row.dataset.idx;
-    const nm=row.querySelector(".nm"), am=row.querySelector(".am");
+    const nm=row.querySelector(".nm"), am=row.querySelector(".am"); attachComma(am);
     nm.oninput=()=>{ nwEnsure(curMember,nwMonth)[cat][idx].name=nm.value; scheduleNwSave(); };
-    am.oninput=()=>{ nwEnsure(curMember,nwMonth)[cat][idx].amount=parseFloat(am.value)||0; updateNwTotals(); scheduleNwSave(); };
+    am.addEventListener("input",()=>{ nwEnsure(curMember,nwMonth)[cat][idx].amount=numVal(am)||0; updateNwTotals(); scheduleNwSave(); });
     const mv=row.querySelector(".mv");
     if(mv) mv.onchange=()=>{ const to=mv.value; if(to===cat) return;
       const s=nwEnsure(curMember,nwMonth); const item=s[cat].splice(idx,1)[0];
@@ -1468,12 +1507,12 @@ function scheduleManualSave(){ $("#ma-saved").textContent="저장 중…"; clear
 function renderManual(){
   const s=manualAssets[curMonth]||{};
   const total=Number(s.total)||0, debt=Number(s.debt)||0;
-  $("#ma-total").value = s.total?s.total:"";
-  $("#ma-debt").value = s.debt?s.debt:"";
+  setNum("#ma-total", s.total?s.total:"");
+  setNum("#ma-debt", s.debt?s.debt:"");
   $("#ma-net").value = won(total-debt);
 }
 function maUpdate(){
-  const total=parseFloat($("#ma-total").value)||0, debt=parseFloat($("#ma-debt").value)||0;
+  const total=numVal("#ma-total")||0, debt=numVal("#ma-debt")||0;
   manualAssets[curMonth]={total, debt};
   $("#ma-net").value=won(total-debt);
   scheduleManualSave();
@@ -1482,11 +1521,32 @@ $("#ma-total").oninput=maUpdate; $("#ma-debt").oninput=maUpdate;
 function shiftMonth(delta){ let[y,m]=curMonth.split("-").map(Number); m+=delta;
   if(m<1){m=12;y--;} if(m>12){m=1;y++;} curMonth=`${y}-${String(m).padStart(2,"0")}`; renderLedger(); }
 $("#prev-m").onclick=()=>shiftMonth(-1); $("#next-m").onclick=()=>shiftMonth(1);
+let editingLedgerIdx=null;
+function cancelLedgerEdit(){ editingLedgerIdx=null; $("#l-add").textContent="＋ 추가";
+  $("#l-cancel").style.display="none"; $("#l-amt").value=""; $("#l-memo").value=""; }
+window.editLedger=(i)=>{ const e=ledger[i]; if(!e) return;
+  $("#l-date").value=e.date||$("#l-date").value;
+  if([...$("#l-member").options].some(o=>o.value===(e.member||""))) $("#l-member").value=e.member||"";
+  $("#l-type").value=e.type||"변동지출"; fillCats();
+  const cat=e.category||""; const sel=$("#l-cat");
+  if(cat && ![...sel.options].some(o=>o.value===cat)){ const op=document.createElement("option"); op.value=cat; op.textContent=cat; sel.appendChild(op); }
+  if(cat) sel.value=cat;
+  setNum("#l-amt", e.amount); $("#l-memo").value=e.memo||"";
+  editingLedgerIdx=i; $("#l-add").textContent="✔ 수정 저장"; $("#l-cancel").style.display="";
+  $("#l-date").scrollIntoView({behavior:"smooth",block:"center"}); };
+$("#l-cancel").onclick=cancelLedgerEdit;
 $("#l-add").onclick=async()=>{
-  const date=$("#l-date").value, amt=parseFloat($("#l-amt").value);
+  const date=$("#l-date").value, amt=numVal("#l-amt");
   if(!date||isNaN(amt)){ alert("날짜와 금액을 입력해 주세요."); return; }
-  ledger.push({date, member:$("#l-member").value, type:$("#l-type").value,
-    category:$("#l-cat").value, amount:amt, memo:$("#l-memo").value.trim()});
+  const rec={date, member:$("#l-member").value, type:$("#l-type").value,
+    category:$("#l-cat").value, amount:amt, memo:$("#l-memo").value.trim()};
+  if(editingLedgerIdx!==null){
+    const bak=ledger[editingLedgerIdx]; ledger[editingLedgerIdx]=rec;
+    try{ await saveLedger(); clearErr(); cancelLedgerEdit(); curMonth=date.slice(0,7); renderLedger(); }
+    catch(e){ ledger[editingLedgerIdx]=bak; showErr("수정 저장에 잠깐 실패했어요. 다시 눌러 주세요. ("+e+")"); }
+    return;
+  }
+  ledger.push(rec);
   try{ await saveLedger(); clearErr(); $("#l-amt").value=""; $("#l-memo").value="";
     curMonth=date.slice(0,7); renderLedger(); }
   catch(e){ ledger.pop(); showErr("저장에 잠깐 실패했어요. 다시 [＋ 추가]를 눌러 주세요. ("+e+")"); }
@@ -1530,7 +1590,7 @@ function renderLedger(){
       <td class="l" data-label="구분"><span class="pill ${e.type}">${e.type}</span></td>
       <td class="l" data-label="분류">${e.category||"-"}</td><td class="l" data-label="메모">${e.memo||""}</td>
       <td class="${c}" data-label="금액">${e.type==="수입"?"+":"-"}${won(e.amount)}</td>
-      <td class="c-act"><button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
+      <td class="c-act"><button class="mini-btn edit" onclick="editLedger(${x.i})">수정</button> <button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
   html+=`</tbody></table>`; $("#ledger-tbl").innerHTML=html;
 }
 
@@ -1680,6 +1740,7 @@ $("#file-import").onchange=(e)=>{ const f=e.target.files[0]; e.target.value=""; 
 if(window.MULTIUSER){ const lo=$("#btn-logout"); lo.style.display=""; lo.onclick=()=>{ location.href="/logout"; }; }
 async function init(){
   $("#l-date").value=new Date().toISOString().slice(0,10);
+  commaInit();
   await loadMembers(); renderMemberBar(); fillCats();
   await Promise.all([loadHoldings(),loadNetworth(),loadLedger(),loadManual(),ensureLive()]).catch(()=>{});
   await restoreServerIfLost();
