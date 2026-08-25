@@ -906,8 +906,9 @@ PAGE = r"""<!doctype html>
     <div class="hint">자산현황의 <b>투자는 실시간</b>이라 매월 값이 바뀌어요. 여기에 그 달의 총자산·부채를
       직접 적어두면 <b>그 달 숫자로 고정</b>돼서 나중에 비교하기 좋아요. 입력하면 자동 저장돼요.</div>
     <div class="grid stat-grid" id="ledger-stats"></div>
+    <div class="chart-card" style="margin:14px 0"><h3>월별 수입 vs 지출</h3><div class="chart-scroll" id="l-barchart"></div></div>
     <div class="two" style="margin:14px 0">
-      <div class="chart-card"><h3>월별 수입 vs 지출</h3><div class="chart-scroll" id="l-barchart"></div></div>
+      <div class="chart-card"><h3>이 달 수입 구성</h3><div id="l-donut-inc"></div></div>
       <div class="chart-card"><h3>이 달 지출 구성</h3><div id="l-donut"></div></div>
     </div>
     <div class="sec-title">내역 추가</div>
@@ -1589,6 +1590,12 @@ function renderLedger(){
     cmap[k]=(cmap[k]||0)+(Number(x.e.amount)||0); });
   const donut=Object.keys(cmap).map((k,i)=>({label:k,value:cmap[k],color:PALETTE[i%PALETTE.length]}));
   $("#l-donut").innerHTML=svgDonut(donut);
+  // 이 달 수입 구성 도넛 (분류별)
+  const imap={};
+  items.forEach(x=>{ if(x.e.type!=="수입")return; const k=x.e.category||"기타";
+    imap[k]=(imap[k]||0)+(Number(x.e.amount)||0); });
+  const donutInc=Object.keys(imap).map((k,i)=>({label:k,value:imap[k],color:PALETTE[i%PALETTE.length]}));
+  $("#l-donut-inc").innerHTML=svgDonut(donutInc);
   // 표
   let html=`<table><thead><tr><th class="l">날짜</th><th class="l">가족</th><th class="l">구분</th><th class="l">분류</th>
     <th class="l">메모</th><th>금액</th><th></th></tr></thead><tbody>`;
