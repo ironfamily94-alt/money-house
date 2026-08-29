@@ -588,7 +588,7 @@ PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>내 자산관리 대시보드</title>
-<script>window.MULTIUSER=__MULTIUSER__;</script>
+<script>window.MULTIUSER=__MULTIUSER__; window.MYUID="__USERID__";</script>
 <style>
   :root{
     --bg:#0e1117; --panel:#161b24; --panel2:#1c2430; --line:#242c3a;
@@ -993,7 +993,9 @@ async function fetchJSON(url, opts, tries=3){
 }
 
 // ===== 브라우저 이중 백업 (서버 저장이 실패해도 자료가 안 사라지게) =====
-const LS={holdings:"awm_holdings_v1", ledger:"awm_ledger_v1", networth:"awm_networth_v1", members:"awm_members_v1", groups:"awm_groups_v1", cats:"awm_cats_v1", manual:"awm_manual_v1", lcats:"awm_lcats_v1"};
+// 사람별 로그인(클라우드)일 때는 브라우저 백업도 계정별로 분리 → 새 계정은 빈 상태로 시작
+const _LSP=(window.MULTIUSER&&window.MYUID)?("u_"+window.MYUID+"_"):"";
+const LS={holdings:_LSP+"awm_holdings_v1", ledger:_LSP+"awm_ledger_v1", networth:_LSP+"awm_networth_v1", members:_LSP+"awm_members_v1", groups:_LSP+"awm_groups_v1", cats:_LSP+"awm_cats_v1", manual:_LSP+"awm_manual_v1", lcats:_LSP+"awm_lcats_v1"};
 function lsGet(k){ try{ const v=localStorage.getItem(k); return v==null?null:JSON.parse(v); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 let serverSaveFailed=false;
@@ -1873,7 +1875,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._login_page()
         try:
             if p == "/":
-                self._send(200, PAGE.replace("__MULTIUSER__", "1" if MULTI_USER else "0"), "text/html")
+                _uid = (_current_user() or "") if MULTI_USER else ""
+                _uid = "".join(ch for ch in _uid if ch.isalnum() or ch in "_-")
+                page = PAGE.replace("__MULTIUSER__", "1" if MULTI_USER else "0").replace("__USERID__", _uid)
+                self._send(200, page, "text/html")
             elif p == "/api/market":
                 self._json(build_market())
             elif p == "/api/portfolio_live":
