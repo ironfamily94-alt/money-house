@@ -967,9 +967,11 @@ function setNum(sel,v){ const el=typeof sel==="string"?$(sel):sel; if(!el) retur
   el.value=(v===""||v===null||v===undefined||isNaN(v))?"":groupNum(String(v)); }
 function attachComma(el){ if(!el||el._comma) return; el._comma=1;
   el.type="text"; el.setAttribute("inputmode","decimal"); el.setAttribute("autocomplete","off");
-  el.addEventListener("input",()=>{ const before=el.value.slice(0,el.selectionStart||0);
-    const nb=(before.match(/[0-9]/g)||[]).length; el.value=groupNum(el.value);
-    let pos=0,seen=0; while(pos<el.value.length&&seen<nb){ const c=el.value.charCodeAt(pos); if(c>=48&&c<=57)seen++; pos++; }
+  el.addEventListener("input",()=>{ const raw=el.value, sel=el.selectionStart||0;
+    // 커서 앞의 '쉼표가 아닌 글자' 개수를 세서, 서식 후에도 같은 위치로 복원 (소수점 포함)
+    let nb=0; for(let i=0;i<sel;i++){ if(raw.charAt(i)!==",") nb++; }
+    el.value=groupNum(raw);
+    let pos=0,seen=0; while(pos<el.value.length&&seen<nb){ if(el.value.charAt(pos)!==",") seen++; pos++; }
     if(el.setSelectionRange){ try{el.setSelectionRange(pos,pos);}catch(e){} } }); }
 function commaInit(root){ (root||document).querySelectorAll("input[data-comma]").forEach(attachComma); }
 
