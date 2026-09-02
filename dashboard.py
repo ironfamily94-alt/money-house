@@ -1368,9 +1368,15 @@ function nwCatSum(cats,cat){ return cats[cat].reduce((a,b)=>a+b.amount,0); }
 let nwSaveTimer=null;
 function scheduleNwSave(){ $("#nw-saved").textContent="저장 중…"; clearTimeout(nwSaveTimer);
   nwSaveTimer=setTimeout(saveNetworthNow,700); }
-async function saveNetworthNow(){ clearTimeout(nwSaveTimer);
+async function saveNetworthNow(){ clearTimeout(nwSaveTimer); nwSaveTimer=null;
   try{ await saveNetworth(); $("#nw-saved").textContent="저장됨 ✓"; clearErr(); }
   catch(e){ $("#nw-saved").textContent="저장 실패 — 잠시 뒤 자동 재시도"; } }
+// 밀린(디바운스 대기 중) 저장을 즉시 마무리 — 탭 이동·화면 숨김·창 닫힘 직전에 호출
+function flushSaves(){
+  try{ if(nwSaveTimer){ saveNetworthNow(); } }catch(e){}
+  try{ if(typeof maSaveTimer!=="undefined" && maSaveTimer){ clearTimeout(maSaveTimer); maSaveTimer=null;
+    saveManual(); const el=$("#ma-saved"); if(el) el.textContent="저장됨 ✓"; } }catch(e){}
+}
 $("#nw-copy").onclick=()=>{
   if(isAggregateScope()) return;
   const ms=Object.keys(networth[curMember]||{}).filter(m=>m<nwMonth).sort();
@@ -1425,6 +1431,9 @@ function bindNwEditors(){
     const nm=row.querySelector(".nm"), am=row.querySelector(".am"); attachComma(am);
     nm.oninput=()=>{ nwEnsure(curMember,nwMonth)[cat][idx].name=nm.value; scheduleNwSave(); };
     am.addEventListener("input",()=>{ nwEnsure(curMember,nwMonth)[cat][idx].amount=numVal(am)||0; updateNwTotals(); scheduleNwSave(); });
+    // 칸에서 손을 떼는(포커스 잃는) 즉시 저장 → 디바운스 대기 중 잃어버리지 않게
+    nm.addEventListener("blur",()=>{ if(nwSaveTimer) saveNetworthNow(); });
+    am.addEventListener("blur",()=>{ if(nwSaveTimer) saveNetworthNow(); });
     const mv=row.querySelector(".mv");
     if(mv) mv.onchange=()=>{ const to=mv.value; if(to===cat) return;
       const s=nwEnsure(curMember,nwMonth); const item=s[cat].splice(idx,1)[0];
@@ -1531,6 +1540,8 @@ function maUpdate(){
   scheduleManualSave();
 }
 $("#ma-total").oninput=maUpdate; $("#ma-debt").oninput=maUpdate;
+$("#ma-total").addEventListener("blur",()=>{ if(maSaveTimer) flushSaves(); });
+$("#ma-debt").addEventListener("blur",()=>{ if(maSaveTimer) flushSaves(); });
 function shiftMonth(delta){ let[y,m]=curMonth.split("-").map(Number); m+=delta;
   if(m<1){m=12;y--;} if(m>12){m=1;y++;} curMonth=`${y}-${String(m).padStart(2,"0")}`; renderLedger(); }
 $("#prev-m").onclick=()=>shiftMonth(-1); $("#next-m").onclick=()=>shiftMonth(1);
@@ -1616,12 +1627,17 @@ function renderLedger(){
 // ===== 탭/가족/새로고침 =====
 let curTab="market", curMember="전체", members=["남편","아내","자녀"], groups=[];
 document.querySelectorAll(".tab").forEach(t=>{ t.onclick=()=>{
+  flushSaves();   // 다른 탭으로 가기 전에 밀린 저장부터 마무리
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
   document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
   t.classList.add("active"); $("#page-"+t.dataset.tab).classList.add("active");
   curTab=t.dataset.tab;
   $("#member-bar").style.display = (curTab==="market") ? "none" : "flex";
   refresh(); }; });
+// 화면을 숨기거나(폰에서 다른 앱으로 전환) 창을 닫기 직전에도 밀린 저장을 마무리
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) flushSaves(); });
+window.addEventListener("pagehide", flushSaves);
+window.addEventListener("beforeunload", flushSaves);
 // 현재 보기 범위에 속한 가족 목록 / 합산(읽기전용)인지
 function currentMembers(){
   if(curMember==="전체") return members;
