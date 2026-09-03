@@ -1383,9 +1383,15 @@ $("#nw-copy").onclick=()=>{
   if(!ms.length){ alert("이전에 저장한 달이 없어요."); return; }
   const src=(networth[curMember]||{})[ms[ms.length-1]]||{};
   const dst=nwEnsure(curMember,nwMonth);
-  // 항목 이름만 가져오고 금액은 빈 칸으로 (새 달 값은 직접 입력)
-  nwAll().forEach(c=>{ dst[c]=(src[c]||[]).map(it=>({name:it.name,amount:0})); });
+  // 지난 달 '항목 이름'만 가져오되, 이번 달에 이미 입력한 건 절대 덮어쓰지 않고 그대로 둠 (없는 항목만 추가)
+  let added=0;
+  nwAll().forEach(c=>{ const existing=dst[c]||(dst[c]=[]);
+    const names=new Set(existing.map(it=>(it.name||"").trim()));
+    (src[c]||[]).forEach(it=>{ const nm=(it.name||"").trim();
+      if(nm && !names.has(nm)){ existing.push({name:it.name,amount:0}); names.add(nm); added++; } }); });
   saveNetworthNow(); renderNetworth();
+  alert(added>0 ? ("지난 달 항목 "+added+"개를 불러왔어요.\n(이번 달에 이미 입력한 숫자는 그대로 있어요 👍)")
+                : "새로 가져올 항목이 없어요. 이미 다 있어요 :)");
 };
 function renderNetworth(){
   $("#nw-month").textContent=nwMonth;
