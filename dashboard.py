@@ -844,7 +844,8 @@ PAGE = r"""<!doctype html>
       <div class="fld"><label>증권사</label><input id="s-broker" list="brokers" placeholder="예: 키움증권" size="8">
         <datalist id="brokers"><option>키움증권</option><option>한국투자증권</option><option>삼성증권</option>
           <option>미래에셋증권</option><option>NH투자증권</option><option>KB증권</option><option>신한투자증권</option>
-          <option>토스증권</option><option>대신증권</option></datalist></div>
+          <option>토스증권</option><option>대신증권</option><option>SK증권</option><option>하나증권</option>
+          <option>카카오페이증권</option><option>메리츠증권</option><option>유안타증권</option><option>LS증권</option></datalist></div>
       <div class="fld"><label>계좌종류</label><input id="s-account" list="accounts" placeholder="예: 일반계좌" size="8">
         <datalist id="accounts"><option>일반계좌</option><option>연금계좌</option><option>ISA계좌</option>
           <option>국내계좌</option><option>해외계좌</option></datalist></div>
@@ -921,6 +922,7 @@ PAGE = r"""<!doctype html>
         <div style="display:flex;gap:4px;align-items:center">
           <select id="l-cat"></select>
           <button class="btn ghost" id="l-cat-add" title="분류 추가" style="padding:9px 11px;font-weight:700">＋</button>
+          <button class="btn ghost" id="l-cat-del" title="선택한 분류 삭제" style="padding:9px 11px;font-weight:700">🗑</button>
         </div></div>
       <div class="fld"><label>금액(원)</label><input id="l-amt" data-comma placeholder="15000" size="8"></div>
       <div class="fld"><label>메모</label><input id="l-memo" placeholder="예: 점심 식사" size="11"></div>
@@ -1507,6 +1509,15 @@ $("#l-cat-add").onclick=async()=>{
   if(catsFor(t).includes(name)){ alert("이미 있는 분류예요."); return; }
   ledgerCats[t]=ledgerCats[t]||[]; ledgerCats[t].push(name);
   await saveMembers(); fillCats(); $("#l-cat").value=name; };
+$("#l-cat-del").onclick=async()=>{
+  const t=$("#l-type").value; const name=$("#l-cat").value;
+  if(!name) return;
+  const base=(CATS[t]||[]);
+  if(base.includes(name) || name==="기타"){ alert("‘"+name+"’은(는) 기본 분류라 지울 수 없어요.\n내가 직접 추가한 분류만 지울 수 있어요."); return; }
+  if(!(ledgerCats[t]||[]).includes(name)){ alert("지울 수 없는 분류예요."); return; }
+  if(!confirm("‘"+name+"’ 분류를 목록에서 지울까요?\n(이미 적어둔 내역은 그대로 남아요)")) return;
+  ledgerCats[t]=(ledgerCats[t]||[]).filter(c=>c!==name);
+  await saveMembers(); fillCats(); };
 async function loadLedger(){ const srv=await fetchJSON("/api/ledger").catch(()=>undefined);
   const bak=lsGet(LS.ledger);
   if(srv&&srv.length) ledger=srv;
