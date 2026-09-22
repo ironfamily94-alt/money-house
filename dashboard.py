@@ -697,7 +697,14 @@ PAGE = r"""<!doctype html>
   .btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line);}
   .hint{font-size:12px;color:var(--sub);margin:8px 4px;line-height:1.6;}
   .month-nav{display:flex;align-items:center;gap:14px;margin:4px 0 16px;}
-  .month-nav .m{font-size:20px;font-weight:800;min-width:130px;text-align:center;}
+  .month-nav .m{font-size:20px;font-weight:800;min-width:150px;text-align:center;line-height:1.15;}
+  .month-nav .m .rng{display:block;font-size:12px;font-weight:600;color:var(--sub);margin-top:2px;}
+  .pay-set{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin:2px 0 12px;}
+  .pay-set .pl{font-weight:700;font-size:14px;}
+  .pay-set select{padding:6px 9px;border-radius:8px;background:var(--panel);color:var(--text);
+    border:1px solid var(--line);font-size:14px;}
+  .pay-set .ph{font-size:12px;color:var(--sub);}
   .nav-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;
     width:38px;height:38px;font-size:18px;cursor:pointer;}
   .empty{color:var(--sub);text-align:center;padding:26px;font-size:14px;}
@@ -872,7 +879,7 @@ PAGE = r"""<!doctype html>
       <button class="nav-btn" id="nw-next">›</button>
     </div>
     <div class="month-nav" style="margin:0 0 10px">
-      <button class="btn ghost" id="nw-copy">지난 달 항목 불러오기 (금액 제외)</button>
+      <button class="btn ghost" id="nw-copy">지난 달 항목·금액 불러오기</button>
       <span class="autosave" id="nw-saved"></span>
     </div>
     <div class="grid stat-grid" id="nw-stats"></div>
@@ -891,6 +898,11 @@ PAGE = r"""<!doctype html>
 
   <!-- 탭4 가계부 -->
   <div class="page" id="page-ledger">
+    <div class="pay-set">
+      <span class="pl">💰 월급 시작일</span>
+      <select id="pay-start"></select>
+      <span class="ph" id="pay-hint"></span>
+    </div>
     <div class="month-nav">
       <button class="nav-btn" id="prev-m">‹</button>
       <div class="m" id="cur-month"></div>
@@ -977,6 +989,33 @@ function attachComma(el){ if(!el||el._comma) return; el._comma=1;
     if(el.setSelectionRange){ try{el.setSelectionRange(pos,pos);}catch(e){} } }); }
 function commaInit(root){ (root||document).querySelectorAll("input[data-comma]").forEach(attachComma); }
 
+// ===== 급여(월급날) 기준 기간 계산 =====
+let payStart=1;   // 각자 정한 시작일 1~28 (기본 1 = 달력 1일~말일)
+function pad2(n){ return String(n).padStart(2,"0"); }
+function daysInMonth(y,m){ return new Date(y, m, 0).getDate(); }   // m: 1~12
+function periodStartDay(y,m){ return Math.min(payStart, daysInMonth(y,m)); }
+function periodKey(dateStr){       // 날짜(YYYY-MM-DD) → 그 날이 속한 기간 키(=시작월 YYYY-MM)
+  const p=(dateStr||"").split("-").map(Number); let y=p[0],m=p[1],d=p[2];
+  if(!y||!m||!d) return (dateStr||"").slice(0,7);
+  if(d < periodStartDay(y,m)){ m-=1; if(m<1){m=12;y--;} }
+  return y+"-"+pad2(m);
+}
+function periodRange(key){          // 기간 키 → {start,end} (Date)
+  const p=(key||"").split("-").map(Number); let y=p[0],m=p[1];
+  const start=new Date(y, m-1, periodStartDay(y,m));
+  let ny=y, nm=m+1; if(nm>12){nm=1;ny++;}
+  const end=new Date(ny, nm-1, periodStartDay(ny,nm)); end.setDate(end.getDate()-1);
+  return {start,end};
+}
+function periodShort(key){ return (periodRange(key).end.getMonth()+1)+"월"; }
+function periodLabelHTML(key){
+  const r=periodRange(key); const em=r.end.getMonth()+1;
+  const f=dt=>(dt.getMonth()+1)+"/"+dt.getDate();
+  if(payStart<=1) return "<b>"+em+"월</b>";
+  return "<b>"+em+"월</b> <span class='rng'>"+f(r.start)+"~"+f(r.end)+"</span>";
+}
+function todayKey(){ return periodKey(new Date().toISOString().slice(0,10)); }
+
 // 네트워크 요청 (실패하면 자동으로 몇 번 더 시도해서 간헐적 끊김을 넘김)
 async function fetchJSON(url, opts, tries=3){
   let last;
@@ -999,7 +1038,7 @@ async function fetchJSON(url, opts, tries=3){
 // ===== 브라우저 이중 백업 (서버 저장이 실패해도 자료가 안 사라지게) =====
 // 사람별 로그인(클라우드)일 때는 브라우저 백업도 계정별로 분리 → 새 계정은 빈 상태로 시작
 const _LSP=(window.MULTIUSER&&window.MYUID)?("u_"+window.MYUID+"_"):"";
-const LS={holdings:_LSP+"awm_holdings_v1", ledger:_LSP+"awm_ledger_v1", networth:_LSP+"awm_networth_v1", members:_LSP+"awm_members_v1", groups:_LSP+"awm_groups_v1", cats:_LSP+"awm_cats_v1", manual:_LSP+"awm_manual_v1", lcats:_LSP+"awm_lcats_v1"};
+const LS={holdings:_LSP+"awm_holdings_v1", ledger:_LSP+"awm_ledger_v1", networth:_LSP+"awm_networth_v1", members:_LSP+"awm_members_v1", groups:_LSP+"awm_groups_v1", cats:_LSP+"awm_cats_v1", manual:_LSP+"awm_manual_v1", lcats:_LSP+"awm_lcats_v1", paystart:_LSP+"awm_paystart_v1"};
 function lsGet(k){ try{ const v=localStorage.getItem(k); return v==null?null:JSON.parse(v); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 let serverSaveFailed=false;
@@ -1396,7 +1435,7 @@ $("#nw-copy").onclick=()=>{
                 : "새로 가져올 항목이 없어요. 이미 다 있어요 :)");
 };
 function renderNetworth(){
-  $("#nw-month").textContent=nwMonth;
+  $("#nw-month").innerHTML=periodLabelHTML(nwMonth);
   const isAll=isAggregateScope();
   $("#nw-hint-all").style.display=isAll?"block":"none";
   $("#nw-copy").style.display=isAll?"none":"inline-block";
@@ -1477,7 +1516,7 @@ function updateNwTotals(){
       nwCats.forEach(c=>(s[c]||[]).forEach(it=>a+=Number(it.amount)||0));
       (s["부채"]||[]).forEach(it=>d+=Number(it.amount)||0);
       a+=liveStockRows(mem).reduce((x,y)=>x+y.amount,0); });
-    return {label:m, net:a-d};
+    return {label:periodShort(m), net:a-d};
   });
   $("#nw-trend").innerHTML=svgTrend(trend);
   // 도넛 (분류별 자산 구성)
@@ -1583,21 +1622,21 @@ $("#l-add").onclick=async()=>{
     category:$("#l-cat").value, amount:amt, memo:$("#l-memo").value.trim()};
   if(editingLedgerIdx!==null){
     const bak=ledger[editingLedgerIdx]; ledger[editingLedgerIdx]=rec;
-    try{ await saveLedger(); clearErr(); cancelLedgerEdit(); curMonth=date.slice(0,7); renderLedger(); }
+    try{ await saveLedger(); clearErr(); cancelLedgerEdit(); curMonth=periodKey(date); renderLedger(); }
     catch(e){ ledger[editingLedgerIdx]=bak; showErr("수정 저장에 잠깐 실패했어요. 다시 눌러 주세요. ("+e+")"); }
     return;
   }
   ledger.push(rec);
   try{ await saveLedger(); clearErr(); $("#l-amt").value=""; $("#l-memo").value="";
-    curMonth=date.slice(0,7); renderLedger(); }
+    curMonth=periodKey(date); renderLedger(); }
   catch(e){ ledger.pop(); showErr("저장에 잠깐 실패했어요. 다시 [＋ 추가]를 눌러 주세요. ("+e+")"); }
 };
 window.delLedger=async(i)=>{ ledger.splice(i,1); await saveLedger(); renderLedger(); };
 function renderLedger(){
-  $("#cur-month").textContent=curMonth;
+  $("#cur-month").innerHTML=periodLabelHTML(curMonth);
   renderManual();
   const items=ledger.map((e,i)=>({e,i}))
-    .filter(x=>(x.e.date||"").slice(0,7)===curMonth && memberMatch(x.e.member))
+    .filter(x=>periodKey(x.e.date)===curMonth && memberMatch(x.e.member))
     .sort((a,b)=>(a.e.date<b.e.date?1:-1));
   let inc=0,fix=0,vary=0;
   items.forEach(x=>{ const a=Number(x.e.amount)||0;
@@ -1611,11 +1650,11 @@ function renderLedger(){
       <div class="big ${bal>=0?'up':'down'}">${bal>=0?"+":""}${won(bal)}</div></div>`;
   // 월별 수입 vs 지출 (최근 6개월)
   const mmap={};
-  ledger.forEach(e=>{ const m=(e.date||"").slice(0,7); if(!m||!memberMatch(e.member))return;
+  ledger.forEach(e=>{ if(!e.date||!memberMatch(e.member))return; const m=periodKey(e.date);
     const d=mmap[m]=mmap[m]||{income:0,expense:0}; const a=Number(e.amount)||0;
     if(e.type==="수입")d.income+=a; else d.expense+=a; });
   const ms=Object.keys(mmap).sort().slice(-6);
-  $("#l-barchart").innerHTML=svgGroupBars(ms.map(m=>({label:m,income:mmap[m].income,expense:mmap[m].expense})));
+  $("#l-barchart").innerHTML=svgGroupBars(ms.map(m=>({label:periodShort(m),income:mmap[m].income,expense:mmap[m].expense})));
   // 이 달 지출 구성 도넛 (분류별, 고정+변동)
   const cmap={};
   items.forEach(x=>{ if(x.e.type==="수입")return; const k=(x.e.type==="고정지출"?"[고정] ":"[변동] ")+(x.e.category||"기타");
@@ -1678,10 +1717,14 @@ async function loadMembers(){ const d=await fetchJSON("/api/members").catch(()=>
   }else{
     members=["남편","아내","자녀"]; groups=[]; nwCats=[...NW_DEFAULT_CATS]; ledgerCats={};
   }
-  lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats); }
-async function saveMembers(){ lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats);
+  // 월급 시작일 (서버 우선, 없으면 브라우저 백업, 그것도 없으면 1)
+  const srvPS=(d&&Number(d.payStart)>=1&&Number(d.payStart)<=28)?Number(d.payStart):null;
+  const bakPS=Number(lsGet(LS.paystart));
+  payStart = srvPS || ((bakPS>=1&&bakPS<=28)?bakPS:1);
+  lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats); lsSet(LS.paystart, payStart); }
+async function saveMembers(){ lsSet(LS.members, members); lsSet(LS.groups, groups); lsSet(LS.cats, nwCats); lsSet(LS.lcats, ledgerCats); lsSet(LS.paystart, payStart);
   try{ await fetchJSON("/api/members",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify({members,groups,assetCats:nwCats,ledgerCats})}); }
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({members,groups,assetCats:nwCats,ledgerCats,payStart})}); }
   catch(e){ markSaveFail(); } }
 function renderMemberBar(){
   const valid = curMember==="전체" || members.includes(curMember) || groups.some(g=>g.name===curMember);
@@ -1763,7 +1806,7 @@ async function refresh(silent){
 function exportData(){
   const dump={ _app:"내자산관리", _ts:new Date().toISOString(),
     holdings, ledger, networth, monthly:manualAssets,
-    members, groups, assetCats:nwCats, ledgerCats };
+    members, groups, assetCats:nwCats, ledgerCats, payStart };
   const blob=new Blob([JSON.stringify(dump,null,2)],{type:"application/json"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download="자산백업_"+new Date().toISOString().slice(0,10)+".json";
@@ -1782,6 +1825,7 @@ async function importData(file){
   if(Array.isArray(d.groups)) groups=d.groups;
   if(Array.isArray(d.assetCats)&&d.assetCats.length) nwCats=d.assetCats;
   if(d.ledgerCats&&typeof d.ledgerCats==="object") ledgerCats=d.ledgerCats;
+  if(Number(d.payStart)>=1&&Number(d.payStart)<=28) payStart=Number(d.payStart);
   try{ await Promise.all([saveHoldings(),saveLedger(),saveNetworth(),saveManual(),saveMembers()]); }catch(e){}
   alert("불러오기 완료! 🎉 화면을 새로 불러올게요.");
   location.reload();
@@ -1790,10 +1834,24 @@ $("#btn-export").onclick=exportData;
 $("#btn-import").onclick=()=>$("#file-import").click();
 $("#file-import").onchange=(e)=>{ const f=e.target.files[0]; e.target.value=""; if(f) importData(f); };
 if(window.MULTIUSER){ const lo=$("#btn-logout"); lo.style.display=""; lo.onclick=()=>{ location.href="/logout"; }; }
+// 월급 시작일 설정 UI
+function setupPayStart(){
+  const sel=$("#pay-start"); if(!sel) return;
+  sel.innerHTML=Array.from({length:28},(_,i)=>i+1).map(n=>`<option value="${n}">${n}일</option>`).join("");
+  sel.value=String(payStart);
+  updatePayHint();
+  sel.onchange=async()=>{ payStart=Number(sel.value)||1;
+    curMonth=todayKey(); nwMonth=todayKey(); updatePayHint();
+    await saveMembers(); renderLedger(); if(typeof renderNetworth==="function") renderNetworth(); };
+}
+function updatePayHint(){ const h=$("#pay-hint"); if(!h) return;
+  h.textContent = payStart<=1 ? "(매월 1일~말일 · 달력 기준)"
+    : `(매월 ${payStart}일 ~ 다음달 ${payStart-1}일 · 이 기준은 자산현황에도 적용돼요)`; }
 async function init(){
   $("#l-date").value=new Date().toISOString().slice(0,10);
   commaInit();
   await loadMembers(); renderMemberBar(); fillCats();
+  curMonth=todayKey(); nwMonth=todayKey(); setupPayStart();
   await Promise.all([loadHoldings(),loadNetworth(),loadLedger(),loadManual(),ensureLive()]).catch(()=>{});
   await restoreServerIfLost();
   await loadMarket().catch(e=>showErr("시장 데이터를 불러오지 못했어요. ("+e+")"));
@@ -1935,7 +1993,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json({"members": mem if isinstance(mem, list) and mem else DEFAULT_MEMBERS,
                             "groups": grp if isinstance(grp, list) else [],
                             "assetCats": cats if isinstance(cats, list) else [],
-                            "ledgerCats": lcats if isinstance(lcats, dict) else {}})
+                            "ledgerCats": lcats if isinstance(lcats, dict) else {},
+                            "payStart": cfg.get("payStart") if isinstance(cfg, dict) else None})
             elif p == "/api/summary":
                 self._json(compute_summary())
             else:
@@ -1977,10 +2036,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 grp = data.get("groups") if isinstance(data, dict) else None
                 cats = data.get("assetCats") if isinstance(data, dict) else None
                 lcats = data.get("ledgerCats") if isinstance(data, dict) else None
+                ps = data.get("payStart") if isinstance(data, dict) else None
+                try: ps = int(ps)
+                except Exception: ps = None
+                if ps is not None and not (1 <= ps <= 28): ps = None
                 save_json(F_MEMBERS, {"members": mem if isinstance(mem, list) else DEFAULT_MEMBERS,
                                       "groups": grp if isinstance(grp, list) else [],
                                       "assetCats": cats if isinstance(cats, list) else [],
-                                      "ledgerCats": lcats if isinstance(lcats, dict) else {}})
+                                      "ledgerCats": lcats if isinstance(lcats, dict) else {},
+                                      "payStart": ps})
                 self._json({"ok": True})
             else:
                 self._send(404, "not found", "text/plain")
