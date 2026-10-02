@@ -201,7 +201,7 @@ def to_float(v):
 # 시세 캐시: 같은 값을 짧은 시간(45초) 재사용해 야후·네이버 요청을 줄입니다.
 _QCACHE = {}
 _QLOCK = threading.Lock()
-QUOTE_TTL = 45
+QUOTE_TTL = 90
 
 
 def _cache_get(key):
@@ -444,6 +444,24 @@ def build_market():
     out["vix"] = ({"price": vix["price"], "change": vix["change"],
                    "pct": vix["pct"]} if vix else None)
     return out
+
+
+# 시장 데이터 전체를 짧게 캐시 (여러 명이 거의 동시에 들어와도 외부 재조회 없이 즉시 응답)
+_MKT = {"t": 0.0, "v": None}
+_MKTLOCK = threading.Lock()
+MARKET_TTL = 30
+
+
+def build_market_cached():
+    now = time.time()
+    with _MKTLOCK:
+        if _MKT["v"] is not None and (now - _MKT["t"]) < MARKET_TTL:
+            return _MKT["v"]
+    v = build_market()
+    with _MKTLOCK:
+        _MKT["t"] = time.time()
+        _MKT["v"] = v
+    return v
 
 
 # --------------------------- 내 주식 ---------------------------
@@ -705,6 +723,16 @@ PAGE = r"""<!doctype html>
   .pay-set select{padding:6px 9px;border-radius:8px;background:var(--panel);color:var(--text);
     border:1px solid var(--line);font-size:14px;}
   .pay-set .ph{font-size:12px;color:var(--sub);}
+  .lf-bar{margin:0 0 10px;}
+  .lf-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px;}
+  .lf-chip{padding:6px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);
+    color:var(--sub);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .lf-chip:hover{border-color:var(--accent);}
+  .lf-chip.on{background:var(--accent);border-color:var(--accent);color:#06222a;font-weight:800;}
+  .lf-chip.on.inc{background:var(--up);border-color:var(--up);color:#fff;}
+  .lf-chip.on.exp{background:var(--down);border-color:var(--down);color:#fff;}
+  .lf-sum{font-size:13px;color:var(--sub);font-weight:600;margin:2px 0 4px;}
+  .lf-sum b{font-size:15px;}
   .nav-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;
     width:38px;height:38px;font-size:18px;cursor:pointer;}
   .empty{color:var(--sub);text-align:center;padding:26px;font-size:14px;}
@@ -942,6 +970,11 @@ PAGE = r"""<!doctype html>
       <button class="btn ghost" id="l-cancel" style="display:none">취소</button>
     </div>
     <div class="sec-title">이 달 내역</div>
+    <div class="lf-bar">
+      <div class="lf-row" id="lf-type"></div>
+      <div class="lf-row" id="lf-cat"></div>
+      <div class="lf-sum" id="lf-sum"></div>
+    </div>
     <div class="tbl-wrap" id="ledger-tbl"></div>
   </div>
 
@@ -1038,7 +1071,7 @@ async function fetchJSON(url, opts, tries=3){
 // ===== 브라우저 이중 백업 (서버 저장이 실패해도 자료가 안 사라지게) =====
 // 사람별 로그인(클라우드)일 때는 브라우저 백업도 계정별로 분리 → 새 계정은 빈 상태로 시작
 const _LSP=(window.MULTIUSER&&window.MYUID)?("u_"+window.MYUID+"_"):"";
-const LS={holdings:_LSP+"awm_holdings_v1", ledger:_LSP+"awm_ledger_v1", networth:_LSP+"awm_networth_v1", members:_LSP+"awm_members_v1", groups:_LSP+"awm_groups_v1", cats:_LSP+"awm_cats_v1", manual:_LSP+"awm_manual_v1", lcats:_LSP+"awm_lcats_v1", paystart:_LSP+"awm_paystart_v1"};
+const LS={holdings:_LSP+"awm_holdings_v1", ledger:_LSP+"awm_ledger_v1", networth:_LSP+"awm_networth_v1", members:_LSP+"awm_members_v1", groups:_LSP+"awm_groups_v1", cats:_LSP+"awm_cats_v1", manual:_LSP+"awm_manual_v1", lcats:_LSP+"awm_lcats_v1", paystart:_LSP+"awm_paystart_v1", market:_LSP+"awm_market_v1"};
 function lsGet(k){ try{ const v=localStorage.getItem(k); return v==null?null:JSON.parse(v); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 let serverSaveFailed=false;
@@ -1200,14 +1233,23 @@ function vixBlock(v){
     <div class="chg ${c}" style="text-align:center;margin-top:6px">${chg}</div>
     <div class="vix-desc">${desc}<br><span style="color:#6b7484">보통 20 아래면 안정, 30 위면 불안으로 봅니다.</span></div>`;
 }
-async function loadMarket(){
-  const d=await fetchJSON("/api/market");
-  $("#updated").textContent=d.updated+" (KST)";
+function renderMarket(d){
+  if(!d) return;
   $("#indices").innerHTML=(d.indices||[]).map(idxCard).join("");
   $("#assets").innerHTML=[d.fx,...(d.assets||[])].filter(Boolean).map(idxCard).join("");
   $("#rates_kr").innerHTML=rateRows(d.rates_kr||[]);
   $("#rates_us").innerHTML=rateRows(d.rates_us||[]);
   $("#fg").innerHTML=fgBlock(d.fear_greed); $("#vix").innerHTML=vixBlock(d.vix);
+}
+async function loadMarket(silent){
+  // ① 지난번 값을 먼저 즉시 표시 → 입장하자마자 숫자가 보여요 (체감 속도↑)
+  if(!silent){ const c=lsGet(LS.market);
+    if(c){ renderMarket(c); $("#updated").textContent=(c.updated||"")+" (KST · 이전값, 갱신 중…)"; }
+    else { $("#updated").textContent="불러오는 중…"; } }
+  // ② 최신값 받아서 갱신 + 다음 입장을 위해 저장
+  const d=await fetchJSON("/api/market");
+  renderMarket(d); lsSet(LS.market, d);
+  $("#updated").textContent=(d.updated||"")+" (KST)";
 }
 
 // ===== 종합(내 주식) =====
@@ -1526,6 +1568,7 @@ function updateNwTotals(){
 
 // ===== 가계부 =====
 let ledger=[], curMonth=(new Date()).toISOString().slice(0,7);
+let lfType="전체", lfCat="전체";   // 가계부 내역 필터(구분·분류)
 const CATS={
   "수입":["급여","사업","이자/배당","용돈","기타"],
   "고정지출":["주거/월세","공과금","통신비","보험료","교육비","구독료","대출이자","기타"],
@@ -1659,19 +1702,38 @@ function renderLedger(){
   const cmap={};
   items.forEach(x=>{ if(x.e.type==="수입")return; const k=(x.e.type==="고정지출"?"[고정] ":"[변동] ")+(x.e.category||"기타");
     cmap[k]=(cmap[k]||0)+(Number(x.e.amount)||0); });
-  const donut=Object.keys(cmap).map((k,i)=>({label:k,value:cmap[k],color:PALETTE[i%PALETTE.length]}));
+  const donut=Object.keys(cmap).sort((a,b)=>cmap[b]-cmap[a]).map((k,i)=>({label:k,value:cmap[k],color:PALETTE[i%PALETTE.length]}));
   $("#l-donut").innerHTML=svgDonut(donut);
-  // 이 달 수입 구성 도넛 (분류별)
+  // 이 달 수입 구성 도넛 (분류별) — 비율 높은 순
   const imap={};
   items.forEach(x=>{ if(x.e.type!=="수입")return; const k=x.e.category||"기타";
     imap[k]=(imap[k]||0)+(Number(x.e.amount)||0); });
-  const donutInc=Object.keys(imap).map((k,i)=>({label:k,value:imap[k],color:PALETTE[i%PALETTE.length]}));
+  const donutInc=Object.keys(imap).sort((a,b)=>imap[b]-imap[a]).map((k,i)=>({label:k,value:imap[k],color:PALETTE[i%PALETTE.length]}));
   $("#l-donut-inc").innerHTML=svgDonut(donutInc);
+  // ===== 필터 (수입만 / 지출만 / 항목별로 골라 보기) =====
+  const esc=s=>(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const typeMatch=e=> lfType==="전체" ? true : (lfType==="수입" ? e.type==="수입" : e.type!=="수입");
+  const catsPresent=[];
+  items.forEach(x=>{ if(!typeMatch(x.e))return; const c=x.e.category||"기타"; if(!catsPresent.includes(c))catsPresent.push(c); });
+  if(lfCat!=="전체" && !catsPresent.includes(lfCat)) lfCat="전체";
+  const shown=items.filter(x=> typeMatch(x.e) && (lfCat==="전체" || (x.e.category||"기타")===lfCat));
+  // 구분 칩
+  $("#lf-type").innerHTML=[["전체",""],["수입","inc"],["지출","exp"]]
+    .map(([v,cc])=>`<span class="lf-chip ${lfType===v?("on "+cc):""}" onclick="setLedFilter('type','${v}')">${v}</span>`).join("");
+  // 분류 칩 (전체 + 현재 구분의 분류들) — 특수문자 안전하게 번호로 전달
+  const catList=["전체",...catsPresent]; window._lfCats=catList;
+  $("#lf-cat").innerHTML=catList
+    .map((c,i)=>`<span class="lf-chip ${lfCat===c?"on":""}" onclick="setLedFilter('cat',${i})">${esc(c)}</span>`).join("");
+  // 선택 합계
+  let sInc=0,sExp=0; shown.forEach(x=>{ const a=Number(x.e.amount)||0; if(x.e.type==="수입")sInc+=a; else sExp+=a; });
+  $("#lf-sum").innerHTML = lfType==="수입" ? `선택한 수입 합계 <b class="up">${won(sInc)}</b> · ${shown.length}건`
+    : lfType==="지출" ? `선택한 지출 합계 <b class="down">${won(sExp)}</b> · ${shown.length}건`
+    : `선택 내역 ${shown.length}건 · 수입 <b class="up">${won(sInc)}</b> / 지출 <b class="down">${won(sExp)}</b>`;
   // 표
   let html=`<table><thead><tr><th class="l">날짜</th><th class="l">가족</th><th class="l">구분</th><th class="l">분류</th>
     <th class="l">메모</th><th>금액</th><th></th></tr></thead><tbody>`;
-  if(items.length===0){ html+=`<tr><td colspan="7" class="empty">이 달 내역이 없어요. 위에서 추가해 보세요.</td></tr>`; }
-  items.forEach(x=>{ const e=x.e; const c=e.type==="수입"?"up":"down";
+  if(shown.length===0){ html+=`<tr><td colspan="7" class="empty">${items.length?"이 조건에 맞는 내역이 없어요.":"이 달 내역이 없어요. 위에서 추가해 보세요."}</td></tr>`; }
+  shown.forEach(x=>{ const e=x.e; const c=e.type==="수입"?"up":"down";
     html+=`<tr><td class="l ldate">${e.date}</td><td class="l" data-label="가족">${e.member||"공용"}</td>
       <td class="l" data-label="구분"><span class="pill ${e.type}">${e.type}</span></td>
       <td class="l" data-label="분류">${e.category||"-"}</td><td class="l" data-label="메모">${e.memo||""}</td>
@@ -1679,6 +1741,11 @@ function renderLedger(){
       <td class="c-act"><button class="mini-btn edit" onclick="editLedger(${x.i})">수정</button> <button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
   html+=`</tbody></table>`; $("#ledger-tbl").innerHTML=html;
 }
+window.setLedFilter=(kind,val)=>{
+  if(kind==="type"){ lfType=val; lfCat="전체"; }
+  else { lfCat=(window._lfCats&&window._lfCats[val]!==undefined)?window._lfCats[val]:"전체"; }
+  renderLedger();
+};
 
 // ===== 탭/가족/새로고침 =====
 let curTab="market", curMember="전체", members=["남편","아내","자녀"], groups=[];
@@ -1796,7 +1863,7 @@ async function restoreServerIfLost(){
 }
 async function refresh(silent){
   try{ if(!silent) clearErr();
-    if(curTab==="market") await loadMarket();
+    if(curTab==="market") await loadMarket(silent);
     else if(curTab==="asset") await loadAsset();
     else if(curTab==="networth"){ await ensureLive(); renderNetworth(); }
     else if(curTab==="ledger") renderLedger();
@@ -1973,7 +2040,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 page = PAGE.replace("__MULTIUSER__", "1" if MULTI_USER else "0").replace("__USERID__", _uid)
                 self._send(200, page, "text/html")
             elif p == "/api/market":
-                self._json(build_market())
+                self._json(build_market_cached())
             elif p == "/api/portfolio_live":
                 self._json(compute_portfolio())
             elif p == "/api/portfolio_raw":
