@@ -724,13 +724,10 @@ PAGE = r"""<!doctype html>
     border:1px solid var(--line);font-size:14px;}
   .pay-set .ph{font-size:12px;color:var(--sub);}
   .lf-bar{margin:0 0 10px;}
-  .lf-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:7px;}
-  .lf-chip{padding:6px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);
-    color:var(--sub);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
-  .lf-chip:hover{border-color:var(--accent);}
-  .lf-chip.on{background:var(--accent);border-color:var(--accent);color:#06222a;font-weight:800;}
-  .lf-chip.on.inc{background:var(--up);border-color:var(--up);color:#fff;}
-  .lf-chip.on.exp{background:var(--down);border-color:var(--down);color:#fff;}
+  .lf-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;}
+  .lf-lab{font-size:13px;font-weight:700;color:var(--sub);}
+  .lf-row select{padding:7px 11px;border-radius:8px;background:var(--panel);color:var(--text);
+    border:1px solid var(--line);font-size:14px;min-width:92px;}
   .lf-sum{font-size:13px;color:var(--sub);font-weight:600;margin:2px 0 4px;}
   .lf-sum b{font-size:15px;}
   .nav-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;
@@ -971,8 +968,10 @@ PAGE = r"""<!doctype html>
     </div>
     <div class="sec-title">이 달 내역</div>
     <div class="lf-bar">
-      <div class="lf-row" id="lf-type"></div>
-      <div class="lf-row" id="lf-cat"></div>
+      <div class="lf-row">
+        <label class="lf-lab">구분</label><select id="lf-type"></select>
+        <label class="lf-lab">분류</label><select id="lf-cat"></select>
+      </div>
       <div class="lf-sum" id="lf-sum"></div>
     </div>
     <div class="tbl-wrap" id="ledger-tbl"></div>
@@ -1717,13 +1716,15 @@ function renderLedger(){
   items.forEach(x=>{ if(!typeMatch(x.e))return; const c=x.e.category||"기타"; if(!catsPresent.includes(c))catsPresent.push(c); });
   if(lfCat!=="전체" && !catsPresent.includes(lfCat)) lfCat="전체";
   const shown=items.filter(x=> typeMatch(x.e) && (lfCat==="전체" || (x.e.category||"기타")===lfCat));
-  // 구분 칩
-  $("#lf-type").innerHTML=[["전체",""],["수입","inc"],["지출","exp"]]
-    .map(([v,cc])=>`<span class="lf-chip ${lfType===v?("on "+cc):""}" onclick="setLedFilter('type','${v}')">${v}</span>`).join("");
-  // 분류 칩 (전체 + 현재 구분의 분류들) — 특수문자 안전하게 번호로 전달
-  const catList=["전체",...catsPresent]; window._lfCats=catList;
+  // 구분 드롭다운 (전체/수입/지출)
+  $("#lf-type").innerHTML=["전체","수입","지출"]
+    .map(v=>`<option${lfType===v?" selected":""}>${v}</option>`).join("");
+  $("#lf-type").onchange=()=>{ lfType=$("#lf-type").value; lfCat="전체"; renderLedger(); };
+  // 분류 드롭다운 (전체 + 현재 구분의 분류들)
+  const catList=["전체",...catsPresent];
   $("#lf-cat").innerHTML=catList
-    .map((c,i)=>`<span class="lf-chip ${lfCat===c?"on":""}" onclick="setLedFilter('cat',${i})">${esc(c)}</span>`).join("");
+    .map(c=>`<option value="${esc(c)}"${lfCat===c?" selected":""}>${esc(c)}</option>`).join("");
+  $("#lf-cat").onchange=()=>{ lfCat=$("#lf-cat").value||"전체"; renderLedger(); };
   // 선택 합계
   let sInc=0,sExp=0; shown.forEach(x=>{ const a=Number(x.e.amount)||0; if(x.e.type==="수입")sInc+=a; else sExp+=a; });
   $("#lf-sum").innerHTML = lfType==="수입" ? `선택한 수입 합계 <b class="up">${won(sInc)}</b> · ${shown.length}건`
@@ -1741,11 +1742,6 @@ function renderLedger(){
       <td class="c-act"><button class="mini-btn edit" onclick="editLedger(${x.i})">수정</button> <button class="mini-btn" onclick="delLedger(${x.i})">삭제</button></td></tr>`; });
   html+=`</tbody></table>`; $("#ledger-tbl").innerHTML=html;
 }
-window.setLedFilter=(kind,val)=>{
-  if(kind==="type"){ lfType=val; lfCat="전체"; }
-  else { lfCat=(window._lfCats&&window._lfCats[val]!==undefined)?window._lfCats[val]:"전체"; }
-  renderLedger();
-};
 
 // ===== 탭/가족/새로고침 =====
 let curTab="market", curMember="전체", members=["남편","아내","자녀"], groups=[];
